@@ -1,166 +1,220 @@
-const csv = require("csv-parser");
-const fs = require("fs");
 const axios = require("axios");
-// var wd = require("word-definition");
-var WordPOS = require("wordpos"),
-  wordpos = new WordPOS();
+const utils = require("./utils");
 
-const ObjectsToCsv = require("objects-to-csv");
-
-var DomParser = require("dom-parser");
-
-const puppeteer = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-puppeteer.use(StealthPlugin());
-const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
-puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
-
-var parser = new DomParser();
-function sleep(ms) {
-  return new Promise((resolve, reject) => {
-    setTimeout(resolve, ms);
-  });
-}
-function isNoun(word) {
-  return new Promise((resolve, reject) => {
-    try {
-      wordpos.isNoun(word, (result) => {
-        resolve(result);
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function normalize_to_blocks(text) {
-  const lText = text.toLowerCase();
-  return lText.match(/[a-z]+/g);
-}
-
-async function getNounBlocks(text) {
-  const blocks = normalize_to_blocks(text);
-  const rnBlocks = [];
-  const pResults = await Promise.all(blocks.map((block) => isNoun(block)));
-  const result = [];
-  let recentIndex = 0;
-  for (let i = 0; i < pResults.length; i++) {
-    const result = pResults[i];
-    const pResult = pResults[i - 1];
-    if (result) {
-      (pResult && (rnBlocks[rnBlocks.length - 1] += " " + blocks[i])) ||
-        rnBlocks.push(blocks[i]);
-    }
-  }
-
-  console.log(rnBlocks);
-  return rnBlocks;
-}
-const text = `horse watercolor`;
+const sample_img =
+  "C:\\Users\\LAP12881-local\\Desktop\\caferessthreadlessauto\\sample.jpg";
+const sample_title = "Xin chao Vietnam";
+const sample_description = "Day la mo ta bang tieng Viet khong dau";
+const sample_tag = "tag1,tag2,tag3,tag4,tag5,tag6,tag7,tag8,tag9,tag10";
+const sample_email = "17520267@gm.uit.edu.vn";
+const sample_username = "baovit72";
+const sample_password = "Honguyenbao2212!";
+const PAGE_URL_CAFEPRESS = {
+  upload_image:
+    "https://www.cafepress.com/seller/designs/upload?pageOrigin=MyDesigns",
+};
+const PAGE_URL_THREADLESS = {
+  upload_image:
+    "https://www.threadless.com/profile/artist_dashboard/artist-shop/products/create/",
+};
 
 async function run() {
-  const browser = await puppeteer.launch({
-    headless: false,
-    ignoreHTTPSErrors: true,
-    slowMo: 0,
-    args: [
-      "--window-size=1400,900",
-      "--remote-debugging-port=9222",
-      "--remote-debugging-address=0.0.0.0", // You know what your doing?
-      "--disable-gpu",
-      "--disable-features=IsolateOrigins,site-per-process",
-      "--blink-settings=imagesEnabled=true",
-    ],
-  });
-
-  async function getAttrs(elems, attr) {
-    const results = [];
-    for (let i = 0; i < elems.length; i++) {
-      results.push(await (await elems[i].getProperty(attr)).jsonValue());
-    }
-    return results;
-  }
-  async function getTags(href) {
-    await page.goto(href);
-    await sleep(1000);
-    const tagSelector = ".m-design__additional-info-container a";
-    await page.waitForSelector(tagSelector);
-    const tElems = await page.$$(tagSelector);
-    return await getAttrs(tElems, "innerText");
-  }
+  const browser = await utils.getPuppeteerBrowser();
   const page = await browser.newPage();
-  async function getTagsByNoun(noun) {
-    await page.goto(
-      "https://www.teepublic.com/t-shirts?query=" +
-        noun.trim().replace(/\s+/g, "-")
-    );
-    await page.waitForSelector("a[class*='m-tiles__preview']");
-    const tElems = await page.$$("a[class*='m-tiles__preview']");
-    const top5Elems = tElems.length > 0 && tElems.slice(0, 5);
-    const hrefs = await getAttrs(top5Elems, "href");
-    const result = [];
-    for (let i = 0; i < hrefs.length; i++) {
-      result.push([...new Set(await getTags(hrefs[i]))]);
+
+  /**
+   * HELPER
+   */
+  function getProfileId(profileUrl) {
+    //https://www.cafepress.com/profile/147391463
+    return +profileUrl.replace("https://www.cafepress.com/profile/", "");
+  }
+  async function waitThenGetElement(selector, unique) {
+    await page.waitForSelector(selector, { timeout: 60000 });
+    await utils.sleep(1000);
+    if (unique) {
+      return await page.$(selector);
     }
-    return result;
+    return await page.$$(selector);
+  }
+  async function typeToInput(selector, text) {
+    await waitThenGetElement(selector);
+    await page.type(selector, text, { delay: 20 });
+  }
+  async function evalScript(selector, evalCb) {
+    await waitThenGetElement(selector);
+    return await page.$eval(selector, evalCb);
+  }
+  function pushProducts(pId, mId, recommendations) {
+    return new Promise((resolve, reject) => {
+      const params = new URLSearchParams();
+      params.append("imageNo", pId);
+      params.append("memberNo", mId);
+      for (let r of recommendations) {
+        params.append("merchandiseUrls[]", r.Url);
+      }
+      fetch(
+        "https://members.cafepress.com/s/productinfo/createproductsforrecommendationsandsuggestionsrestful",
+        {
+          headers: {
+            accept: "*/*",
+            "accept-language": "en-US,en;q=0.9",
+            "cache-control": "no-cache",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            pragma: "no-cache",
+            "sec-ch-ua":
+              '" Not;A Brand";v="99", "Google Chrome";v="91", "Chromium";v="91"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "x-newrelic-id": "UgAHVF5TGwUDVlJTBwU=",
+            "x-requested-with": "XMLHttpRequest",
+          },
+          referrer: `https://members.cafepress.com/editdesign/${pId}?source=designDetails`,
+          referrerPolicy: "strict-origin-when-cross-origin",
+          body: params,
+          method: "POST",
+          mode: "cors",
+          credentials: "include",
+        }
+      )
+        .then((response) => response.json())
+        .then((data) => resolve(data));
+    });
+  }
+  function fetchProducts(pId) {
+    return new Promise((resolve, reject) => {
+      fetch(
+        `https://members.cafepress.com/m/memberdesigns/getproductsbydepartments?imageno=${pId}`,
+        {
+          headers: {
+            accept: "*/*",
+            "accept-language": "en-US,en;q=0.9",
+            "cache-control": "no-cache",
+            pragma: "no-cache",
+            "sec-ch-ua":
+              '" Not;A Brand";v="99", "Google Chrome";v="91", "Chromium";v="91"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "x-newrelic-id": "UgAHVF5TGwUDVlJTBwU=",
+            "x-requested-with": "XMLHttpRequest",
+          },
+          referrer: `https://members.cafepress.com/editdesign/${pId}?source=designDetails`,
+          referrerPolicy: "strict-origin-when-cross-origin",
+          body: null,
+          method: "GET",
+          mode: "cors",
+          credentials: "include",
+        }
+      )
+        .then((response) => response.json())
+        .then((data) => resolve(data.ProductsByDepartments));
+    });
   }
 
-  async function getTagsByTitle(title) {
-    const result = {};
-    const nouns = await getNounBlocks(title);
-    for (let i = 0; i < nouns.length; i++) {
-      const noun = nouns[i];
-      result[noun] = await getTagsByNoun(noun);
-    }
-    return result;
-  }
-  function standardize(object) {
-    const result = new Array(5);
-    for (let i = 0; i < result.length; i++) {
-      result[i] = [];
-    }
-    console.log(object);
-    for (let key in object) {
-      const tagsArr = object[key];
-      tagsArr.forEach((item, index) => {
-        result[index].push(...item);
-      });
-    }
-    return result;
-  }
-  const results = [];
-  //{title, nouns, p1, p2, p3,p4,p5, all}
-  const output = [];
-  fs.createReadStream("data.csv")
-    .pipe(csv())
-    .on("data", (data) => results.push(data))
-    .on("end", async () => {
-      for (let i = 0; i < results.length; i++) {
-        try {
-          const title = results[i].Title;
-          console.log("Processing title... ", title);
-          const tagsObject = await getTagsByTitle(title);
-          const sTagsObject = standardize(tagsObject);
-          const outputItem = {
-            title,
-            nouns: Object.keys(tagsObject).join(","),
-          };
-          console.log(sTagsObject);
-          sTagsObject.forEach((object, index) => {
-            outputItem["p" + index] = object.join(",");
-          });
-          outputItem["all"] = [
-            ...new Set(sTagsObject.toString().split(",")),
-          ].join(",");
-          output.push(outputItem);
-        } catch (err) {
-          console.log(err);
+  function fetchRecommendations(pId, ids) {
+    return new Promise((resolve, reject) => {
+      fetch(
+        `https://members.cafepress.com/s/productinfo/getproductrecommendationsandsuggestionsforimagenorestful?imageNo=${pId}&productTypeNos=${ids}`,
+        {
+          headers: {
+            accept: "application/json, text/javascript, */*; q=0.01",
+            "accept-language": "en-US,en;q=0.9",
+            "cache-control": "no-cache",
+            pragma: "no-cache",
+            "sec-ch-ua":
+              '" Not;A Brand";v="99", "Google Chrome";v="91", "Chromium";v="91"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "x-newrelic-id": "UgAHVF5TGwUDVlJTBwU=",
+            "x-requested-with": "XMLHttpRequest",
+          },
+          referrer: `https://members.cafepress.com/editdesign/${pId}?source=designDetails`,
+          referrerPolicy: "strict-origin-when-cross-origin",
+          body: null,
+          method: "GET",
+          mode: "cors",
+          credentials: "include",
         }
-      }
-      const csv = new ObjectsToCsv(output);
-      await csv.toDisk("./output.csv");
-      console.log("Done...");
+      )
+        .then((response) => response.json())
+        .then((data) => resolve(data.Suggestions));
     });
+  }
+  /**
+   * FLOW
+   */
+  async function uploadThreadless(title, description, tag, image) {
+    await page.goto(PAGE_URL_THREADLESS.upload_image);
+    await utils.sleep(2000);
+    if (page.url().includes("login")) {
+      await typeToInput("#id_username", sample_username);
+      await typeToInput("#id_password", sample_password);
+      (
+        await waitThenGetElement("input[name='login_threadless']", true)
+      ).click();
+    }
+  }
+  async function uploadCafePress(title, description, tag, image) {
+    await page.goto(PAGE_URL_CAFEPRESS.upload_image);
+    await utils.sleep(2000);
+    if (page.url().includes("login")) {
+      await typeToInput("#loginEmail", sample_email);
+      await typeToInput("#loginPassword", sample_password);
+      (await waitThenGetElement("#btnSignin", true)).click();
+    }
+    //todo: login
+    const imgInput = await waitThenGetElement("#uploadImage", true);
+    await imgInput.uploadFile(image);
+    await typeToInput("#designDisplayName", title);
+    await typeToInput("#designDescription", description);
+    await typeToInput("#designSearchTags", tag);
+    (await waitThenGetElement(".btn-add-tag", true)).click();
+    await evalScript("input[value='1']", (elem) => elem.click());
+    (
+      await waitThenGetElement("#title-actions-wrap button.btn-cp-green", true)
+    ).click();
+    const pId = await evalScript(".dm-img-wrap > div", (elem) =>
+      elem.getAttribute("data")
+    );
+
+    const mId = getProfileId(
+      await evalScript("#b_ghlink_profile > a", (elem) =>
+        elem.getAttribute("href")
+      )
+    );
+    console.log(pId, mId);
+
+    const products = await page.evaluate(fetchProducts, pId);
+    const productIds = [];
+    for (let p of products) {
+      for (let t of p.merchandiseTypes) {
+        if (!p.memberProductTypeIds.includes(t.Id)) productIds.push(t.Id);
+      }
+    }
+    console.log("fetch recommendations");
+    const recommendations = await page.evaluate(
+      fetchRecommendations,
+      pId,
+      productIds.join(",")
+    );
+    console.log(recommendations);
+
+    console.log("push products");
+    await page.evaluate(pushProducts, pId, mId, recommendations);
+  }
+
+  await uploadCafePress(
+    sample_title,
+    sample_description,
+    sample_tag,
+    sample_img
+  );
 }
 
 run();
